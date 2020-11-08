@@ -71,7 +71,7 @@ struct data_seg_desc {
 struct dtr {
     volatile uint16_t limit;
     volatile uint64_t base;
-} __attribute__((packed));
+} __attribute__((aligned(4), packed));
 
 struct gen_seg_desc gdt[GDT_ENTRIES_COUNT];
 

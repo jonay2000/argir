@@ -1,5 +1,4 @@
-#include "efi.h"
-#include "efilib.h"
+#include "stdio.h"
 #include "kernel/cpu.h"
 
 extern void gdt_rst(void);
@@ -96,9 +95,9 @@ void gdt_init()
     };
     sgdt(&loaded_gdtr);
     if (gdtr.limit != loaded_gdtr.limit || gdtr.base != loaded_gdtr.base) {
-        Print(L"Failed to load global descriptor table!\n");
+        printf("Failed to load global descriptor table!\n");
         __asm__ volatile("hlt");
     }
 
-    Print(L"Loaded global descriptor table.\n");
+    printf("Loaded global descriptor table.\n");
 }

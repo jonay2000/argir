@@ -13,9 +13,7 @@ DOCKER_SH=docker run -it --rm \
 AS=x86_64-elf-as
 CC=x86_64-elf-gcc
 LD=x86_64-elf-ld
-CFLAGS=-fPIC -ffreestanding -fno-stack-protector -fno-stack-check -fshort-wchar -mno-red-zone -maccumulate-outgoing-args
-
-EFI_INCLUDES=-I/usr/include/efi -I/usr/include/efi/protocol -I/usr/include/efi/x86_64
+CFLAGS=-Wall -fPIC -ffreestanding -fno-stack-protector -fno-stack-check -mno-red-zone
 
 # Build info
 GIT_COMMIT=$(shell git log -1 --pretty=format:"%H")
@@ -25,6 +23,7 @@ KERNEL_DEFINES=__ARGIR_BUILD_COMMIT__=\"$(GIT_COMMIT)\"
 SRC_DIR=./src
 KERNEL_INCLUDE=$(SRC_DIR)/include
 KERNEL_OBJS=\
+	$(SRC_DIR)/kernel.o \
 	$(SRC_DIR)/kernel/gdt.o \
 	$(SRC_DIR)/kernel/pic.o \
 	$(SRC_DIR)/kernel/idt.o \
@@ -33,12 +32,13 @@ KERNEL_OBJS=\
 	$(SRC_DIR)/kernel/keyboard.o \
 	$(SRC_DIR)/kernel/terminal.o \
 	$(SRC_DIR)/kernel/pci.o \
-	$(SRC_DIR)/kernel.o
+	$(SRC_DIR)/kernel/font_vga.o
 
 KLIB_DIR=$(SRC_DIR)/klib
 KLIB_INCLUDE=$(KLIB_DIR)/include
 KLIB_OBJS=\
 	$(KLIB_DIR)/ringbuf/ringbuf.o \
+	$(KLIB_DIR)/memory/memset.o \
 	$(KLIB_DIR)/stdio/putchar.o \
 	$(KLIB_DIR)/stdio/printf.o \
 	$(KLIB_DIR)/string/strlen.o
@@ -49,31 +49,31 @@ default: clean all
 
 all:
 	$(DOCKER_SH) "make _all"
-	make argir.img
 
-_all: $(ISO_DIR)/EFI/BOOT/BOOTX64.EFI
+_all: argir.img
 
-$(ISO_DIR)/EFI/BOOT/BOOTX64.EFI: $(KERNEL_OBJS) $(KLIB_OBJS)
+$(ISO_DIR)/sys/core: $(KERNEL_OBJS) $(KLIB_OBJS)
 	rm -rf $(ISO_DIR)
-	mkdir -p $(ISO_DIR)/EFI/BOOT
-	$(LD) -z max-page-size=0x1000 -shared -Bsymbolic -L/usr/lib -Tkernel.ld -o $@.so /usr/lib/crt0-efi-x86_64.o $(KERNEL_OBJS) $(KLIB_OBJS) -lgnuefi -lefi
-	objcopy -j .text -j .sdata -j .data -j .dynamic -j .dynsym  -j .rel -j .rela -j .rel.* -j .rela.* -j .reloc \
-		--target efi-app-x86_64 --subsystem=10 $@.so $@
-	rm $@.so
+	mkdir -p $(ISO_DIR)/sys
+	$(LD) -nostdlib -nostartfiles -Tkernel.ld -I$(KLIB_INCLUDE) -I$(KERNEL_INCLUDE) -o $@ $(KERNEL_OBJS) $(KLIB_OBJS)
 
 %.o: %.s
 	$(AS) $< -o $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@ \
-	$(EFI_INCLUDES) -I$(KLIB_INCLUDE) -I$(KERNEL_INCLUDE) -D$(KERNEL_DEFINES)
+	-I$(KLIB_INCLUDE) -I$(KERNEL_INCLUDE) -D$(KERNEL_DEFINES)
 
 # Disk image & Qemu
-argir.img: $(ISO_DIR)/EFI/BOOT/BOOTX64.EFI
-	hdiutil create -fs fat32 -ov -size 48m -volname ARGIROS -format UDTO -srcfolder $(ISO_DIR) $@
+argir.img: $(ISO_DIR)/sys/core
+	mkdir -p $(ISO_DIR)/EFI/BOOT
+	# --- TEST ---
+	# cp testkern.elf $(ISO_DIR)/sys/core
+	cp $(SRC_DIR)/bootboot.efi $(ISO_DIR)/EFI/BOOT/BOOTX64.EFI
+	mkbootimg mkbootimg.json $@
 
-QEMU=qemu-system-x86_64 -cpu qemu64 -bios OVMF.fd -drive file=argir.img.cdr,if=ide \
-	-netdev user,id=eth0 -device ne2k_pci,netdev=eth0 -monitor stdio -d cpu_reset -D ./tmp/qemu.log
+QEMU=qemu-system-x86_64 -cpu qemu64 -bios OVMF.fd -drive file=argir.img,format=raw \
+	-netdev user,id=eth0 -device ne2k_pci,netdev=eth0 -serial stdio -d int,cpu_reset -D ./tmp/qemu.log
 
 run: all
 	$(QEMU)
@@ -92,7 +92,8 @@ _print_toolchain:
 	$(CC) --version
 
 sections:
-	greadelf -S $(ISO_DIR)/boot/argir.bin
+	greadelf -hls $(ISO_DIR)/sys/core
 
 objdump:
-	objdump -x $(ISO_DIR)/boot/argir.bin
+	objdump -d $(SRC_DIR)/kernel.o
+	# objdump -d $(ISO_DIR)/sys/core
